@@ -1,0 +1,81 @@
+# Reference Pattern: Self-Healing Agent Workflow (.github/workflows/gemini-agent.yml)
+# Triggered automatically when ErrorTicketCreator opens a GitHub Issue labeled `auto-heal`.
+# 1. Reacts with 👀 on the issue
+# 2. Assumes the isolated Sandbox AWS role via OIDC (never touches Prod)
+# 3. Packs the affected service's AST context via tools/pack_context.py
+# 4. Reproduces the bug with a failing test, implements the fix, verifies pytest passes, and opens a PR.
+
+name: Self-Healing Agent Loop
+
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  auto-heal:
+    if: contains(github.event.issue.labels.*.name, 'auto-heal')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Acknowledge Issue with 👀
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/reactions" \
+            -f content="eyes"
+
+      - name: Checkout Monorepo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Configure Isolated Sandbox AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.SANDBOX_OIDC_ROLE_ARN }}
+          aws-region: ca-central-1
+
+      - name: Run Autonomous Reproduce-Fix-Verify Loop
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 1. Extract affected service from issue body and generate AST context bundle
+          python3 tools/pack_context.py "${AFFECTED_SERVICE:-common}" --output /tmp/context_pack.md
+
+          # 2. Invoke coding agent with AGENTS.md + context_pack.md + issue traceback
+          #    Enforces: write a failing regression test first -> apply minimal fix -> run pytest
+          python3 tools/run_auto_heal_agent.py \
+            --issue-number "$ISSUE_NUMBER" \
+            --context-pack /tmp/context_pack.md
+
+          # 3. Gate PR creation on green test suite
+          pytest
+
+          # 4. Push branch & open verified Pull Request
+          BRANCH_NAME="gemini/issue-${ISSUE_NUMBER}"
+          git checkout -b "$BRANCH_NAME"
+          git add -A
+          git commit -m "fix: auto-heal issue #${ISSUE_NUMBER}"
+          git push origin "$BRANCH_NAME"
+          gh pr create \
+            --title "fix: auto-heal #${ISSUE_NUMBER} (${ISSUE_TITLE})" \
+            --body "Automated reproduction, regression test, and fix for #${ISSUE_NUMBER}." \
+            --head "$BRANCH_NAME"
