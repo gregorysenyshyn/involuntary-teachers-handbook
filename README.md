@@ -36,6 +36,9 @@ Using the exact classroom rules, AST context packers, and self-healing loops in 
 | **Cloud Hosting Cost** | **<$25/month per environment** (`dev` & `prod` in AWS `ca-central-1` with 4-layer WORM backups & budget kill switches) |
 | **AI Coding Spend** | **$25/month Google AI Plan** (Zero $1,000/month API token overages) |
 
+> **🍎 PD Days for Grown-Ups (Team Training & Repo Audits):**  
+> *I don't just work with kids—I also do trainings for grown-ups.* If your team is burning tokens and fighting AI slop, explore the **4-Session Team Transformation Sprint** or **Half-Day Context Sanitation Clinic** at **[gregorysenyshyn.com/training](https://gregorysenyshyn.com/training)**.
+
 ---
 
 ## 🎒 What's Inside Your Teacher's Kit
