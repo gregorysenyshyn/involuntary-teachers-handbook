@@ -16,10 +16,46 @@ Usage:
 
 import argparse
 import ast
+from collections import defaultdict
+import copy
+import hashlib
 import os
 import re
 import sys
 from typing import Dict, List, Tuple
+
+
+class _AstSkeletonNormalizer(ast.NodeTransformer):
+    """Strip docstrings and normalize variable/arg names and literals to detect structural AST clones."""
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+        body = node.body
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            body = body[1:]
+        return ast.FunctionDef(
+            name="_FUNC_",
+            args=ast.arguments(
+                posonlyargs=[],
+                args=[ast.arg(arg="_a") for _ in node.args.args],
+                kwonlyargs=[],
+                kw_defaults=[],
+                defaults=[],
+            ),
+            body=[self.visit(b) for b in body],
+            decorator_list=[],
+            returns=None,
+        )
+
+    def visit_Name(self, node: ast.Name) -> ast.AST:
+        return ast.Name(id="_V_", ctx=node.ctx)
+
+    def visit_Constant(self, node: ast.Constant) -> ast.AST:
+        return ast.Constant(value=type(node.value).__name__)
 
 VAGUE_FUNCTION_NAMES = {
     "process",
@@ -130,6 +166,7 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
     silent_js_catches: List[str] = []
     cfn_import_values: List[str] = []
     hardcoded_iam_arns: List[str] = []
+    ast_clone_buckets: Dict[str, List[Tuple[int, str]]] = defaultdict(list)
 
     empty_js_catch_re = re.compile(r"catch\s*(?:\([^)]*\))?\s*\{\s*\}")
     iam_arn_re = re.compile(r"arn:aws:iam::\d{12}:role/")
@@ -203,6 +240,17 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
                         elif "_" in clean_name or len(clean_name) >= 12:
                             semantically_dense_functions += 1
 
+                        if isinstance(node, ast.FunctionDef):
+                            fn_lines = (node.end_lineno or node.lineno) - node.lineno + 1
+                            if fn_lines >= 12 and "/scripts/" not in f"/{rel_path}":
+                                norm_tree = _AstSkeletonNormalizer().visit(copy.deepcopy(node))
+                                digest = hashlib.sha256(
+                                    ast.dump(norm_tree, include_attributes=False).encode("utf-8")
+                                ).hexdigest()[:10]
+                                ast_clone_buckets[digest].append(
+                                    (fn_lines, f"{rel_path}:{node.lineno} (`{node.name}`)")
+                                )
+
                     elif isinstance(node, ast.ExceptHandler):
                         if len(node.body) == 1 and isinstance(node.body[0], ast.Pass):
                             silent_py_excepts.append(f"{rel_path}:{node.lineno}")
@@ -240,13 +288,24 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
     iac_penalties = (len(cfn_import_values) * 20.0) + (len(hardcoded_iam_arns) * 25.0)
     iac_score = max(0.0, 100.0 - iac_penalties)
 
+    # 7. Structural AST Clone Hygiene (Copy-Pasted Control-Flow Skeletons >= 12 lines)
+    clone_clusters = [
+        (sum(item[0] for item in items), digest, items)
+        for digest, items in ast_clone_buckets.items()
+        if len(items) > 1
+    ]
+    clone_clusters.sort(reverse=True)
+    duplicated_ast_lines = sum(total_l for total_l, _, _ in clone_clusters)
+    clone_score = max(0.0, min(100.0, 100.0 - (len(clone_clusters) * 4.0)))
+
     overall_score = (
         (world_model_score * 0.20)
-        + (context_score * 0.20)
+        + (context_score * 0.15)
         + (comprehensibility_score * 0.15)
         + (silent_score * 0.15)
         + (testing_score * 0.15)
-        + (iac_score * 0.15)
+        + (iac_score * 0.10)
+        + (clone_score * 0.10)
     )
     overall_grade = score_to_letter_grade(overall_score)
 
@@ -260,6 +319,16 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
         else "  - None! Zero source files exceed 1,000 lines."
     )
 
+    clone_bullets = (
+        "\n".join(
+            f"  - **Cluster `{digest}`** ({len(items)} copies · {total_l} lines): "
+            + ", ".join(loc for _, loc in items[:4])
+            for total_l, digest, items in clone_clusters[:5]
+        )
+        if clone_clusters
+        else "  - None! Zero structural AST clone clusters (>=12 lines) detected."
+    )
+
     report = f"""# 📋 Codebase Report Card: `{repo_name}`
 
 **Overall Agent Readiness Grade:** **{overall_grade}** ({overall_score:.1f} / 100)
@@ -270,20 +339,24 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
 | **2. Context Window Tax (Monolith Bloat)** | **{score_to_letter_grade(context_score)}** | {context_score:.0f}/100 | **{len(monoliths_over_1000)}** / {len(source_files)} files exceed 1,000 lines (~{wasted_tokens_per_turn:,} excess tokens/turn) |
 | **3. AST Comprehensibility & Naming** | **{score_to_letter_grade(comprehensibility_score)}** | {comprehensibility_score:.0f}/100 | **{dense_pct:.0f}%** semantically-dense function names · **{type_pct:.0f}%** type-annotated |
 | **4. Silent Failure Hygiene** | **{score_to_letter_grade(silent_score)}** | {silent_score:.0f}/100 | **{len(silent_py_excepts)}** silent Python `except: pass` · **{len(silent_js_catches)}** empty JS `catch {{}}` |
-| **5. Self-Assessment Coverage** | **{score_to_letter_grade(testing_score)}** | {testing_score:.0f}/100 | **{len(test_files)}** test suites · **{total_assertions:,}** assertions across {len(source_files)} source files |
+| **5. Self-Assessment Coverage** | **{score_to_letter_grade(testing_score)}** | {testing_score:.0f}/100 | **{len(test_files)}** test suites · **{total_assertions:,}** assertions across {len(executable_files)} code modules |
 | **6. Blast Radius & IaC Isolation** | **{score_to_letter_grade(iac_score)}** | {iac_score:.0f}/100 | **{len(cfn_import_values)}** `Fn::ImportValue` deadlocks · **{len(hardcoded_iam_arns)}** hardcoded IAM ARNs |
+| **7. Structural AST Clone Hygiene (DRY)** | **{score_to_letter_grade(clone_score)}** | {clone_score:.0f}/100 | **{len(clone_clusters)}** AST clone clusters ({duplicated_ast_lines} duplicated lines across functions >=12 lines) |
 
 ---
 
 ## 🔍 Top Context-Window Offenders (Files > 1,000 Lines)
 {monolith_bullets}
 
+## 🧬 Top Structural AST Clone Clusters (Alpha-Normalized AST Comparison)
+{clone_bullets}
+
 ---
 
 ## 🛠️ Prioritized 30-Day Remediation Roadmap
 1. **Install the Classroom Syllabus:** {'Already installed (`AGENTS.md`, `CODEBASE_MAP.md`, `SCHEMA_DICTIONARY.md`).' if (has_agents_md and has_codebase_map and has_schema_dict) else 'Add `AGENTS.md`, `CODEBASE_MAP.md`, and `SCHEMA_DICTIONARY.md` so coding agents stop burning 40,000 tokens grepping for architecture boundaries.'}
 2. **Split Monoliths into Declarative Manifests:** {f'Extract static data/prompts from the {len(monoliths_over_1000)} files over 1,000 lines to save ~{wasted_tokens_per_turn:,} tokens per agent read.' if monoliths_over_1000 else 'Keep enforcing the <1,000-line ceiling via `validate_repo_hygiene.py`.'}
-3. **Eliminate Silent Fallbacks:** {f'Replace the {total_silent} silent `except: pass` / `catch {{}}` blocks with descriptive logging so failures serialize into the agent context window.' if total_silent else 'Zero silent fallbacks detected—keep enforcing via AST pre-commit checks.'}
+3. **Consolidate Structural AST Clones & Silent Fallbacks:** {f'Extract the {len(clone_clusters)} AST clone clusters into shared utilities and replace the {total_silent} silent `except: pass` / `catch {{}}` blocks with descriptive logging.' if (clone_clusters or total_silent) else 'Zero AST clones or silent fallbacks detected—keep enforcing via AST pre-commit checks.'}
 
 > **🍎 Want help turning this Report Card into an A+?**  
 > Book a **1-Day PD Day (Socratic Red-Teaming Clinic)** or **The 4-Part Monorepo Makeover** at **[gregorysenyshyn.com/training](https://gregorysenyshyn.com/training)**.
@@ -293,6 +366,7 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
         "overall_grade": overall_grade,
         "monoliths_over_1000": len(monoliths_over_1000),
         "silent_failures": total_silent,
+        "ast_clone_clusters": len(clone_clusters),
         "test_files": len(test_files),
         "source_files": len(source_files),
     }
