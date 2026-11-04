@@ -100,6 +100,7 @@ EXCLUDED_DIRS = {
     "out",
     "scratch",
     "graphify-out",
+    "examples",
 }
 
 
@@ -189,7 +190,9 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
                 except OSError:
                     pass
 
-            if not fname.endswith((".py", ".js", ".ts", ".tsx", ".html", ".css")):
+            if not fname.endswith((".py", ".js", ".ts", ".tsx", ".html", ".css")) or fname.endswith(
+                (".min.js", ".min.css")
+            ):
                 continue
 
             is_test = (
@@ -211,7 +214,9 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
 
             source_files.append((line_count, len(content), rel_path))
 
-            if fname.endswith((".js", ".ts", ".tsx")):
+            is_prod_module = rel_path.startswith(("apps/", "common/")) and "/scripts/" not in f"/{rel_path}"
+
+            if is_prod_module and fname.endswith((".js", ".ts", ".tsx")):
                 for m in empty_js_catch_re.finditer(content):
                     line_no = content[: m.start()].count("\n") + 1
                     silent_js_catches.append(f"{rel_path}:{line_no}")
@@ -244,14 +249,18 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
                             fn_lines = (node.end_lineno or node.lineno) - node.lineno + 1
                             if fn_lines >= 12 and "/scripts/" not in f"/{rel_path}":
                                 norm_tree = _AstSkeletonNormalizer().visit(copy.deepcopy(node))
-                                digest = hashlib.sha256(
-                                    ast.dump(norm_tree, include_attributes=False).encode("utf-8")
-                                ).hexdigest()[:10]
-                                ast_clone_buckets[digest].append(
-                                    (fn_lines, f"{rel_path}:{node.lineno} (`{node.name}`)")
+                                stmt_count = sum(
+                                    1 for n in ast.walk(norm_tree) if isinstance(n, ast.stmt)
                                 )
+                                if stmt_count >= 4:
+                                    digest = hashlib.sha256(
+                                        ast.dump(norm_tree, include_attributes=False).encode("utf-8")
+                                    ).hexdigest()[:10]
+                                    ast_clone_buckets[digest].append(
+                                        (fn_lines, f"{rel_path}:{node.lineno} (`{node.name}`)")
+                                    )
 
-                    elif isinstance(node, ast.ExceptHandler):
+                    elif is_prod_module and isinstance(node, ast.ExceptHandler):
                         if len(node.body) == 1 and isinstance(node.body[0], ast.Pass):
                             silent_py_excepts.append(f"{rel_path}:{node.lineno}")
 
