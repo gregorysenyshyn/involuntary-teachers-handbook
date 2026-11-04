@@ -49,17 +49,19 @@ involuntary-teachers-handbook/
 ├── tools/
 │   ├── pack_context.py                       # 2. The Study Guide Generator (Zero-dep AST context packer)
 │   ├── diagnose_stack.py                     # 3. Descriptive Feedback (EarlyValidation & import debugger)
-│   └── validate_repo_hygiene.py              # 4. Mechanical Hall Monitor (Enforces AGENTS.md, map/schema sync & JS/Py contracts)
+│   ├── validate_repo_hygiene.py              # 4. Mechanical Hall Monitor (Enforces AGENTS.md, PII masking, SSM & JS/Py contracts)
+│   ├── generate_report_card.py               # 5. The Codebase Report Card (Grades any repo A+ to F on Agent Readiness)
+│   └── test_impacted.py                      # 6. Diff-Aware Test Runner (Traces git diff + shared layer imports to impacted suites)
 ├── templates/
-│   ├── CODEBASE_MAP.md                       # 5. The Campus Map (1-read microservice & port directory)
-│   └── SCHEMA_DICTIONARY.md                  # 6. The Vocabulary List (1-read database & payload contracts)
+│   ├── CODEBASE_MAP.md                       # 7. The Campus Map (1-read microservice & port directory)
+│   └── SCHEMA_DICTIONARY.md                  # 8. The Vocabulary List (1-read database & payload contracts)
 ├── examples/
-│   └── self-healing-loop/                    # 7. Self-Grading Homework (Overnight Auto-Heal Loop)
+│   └── self-healing-loop/                    # 9. Self-Grading Homework (Overnight Auto-Heal Loop)
 │       ├── error_reporter.py                 #    Lambda @github_error_reporter + PII-masked SNS publisher
 │       ├── client-error-listener.js          #    Browser JS / unhandledrejection / CSP error forwarder
 │       └── gemini-agent.yml                  #    GitHub Actions workflow (Issue -> OIDC Sandbox -> PR)
 └── prompts/
-    └── SOCRATIC_RED_TEAMING.md               # 8. Checking the Rubric (Prompts to fight addition bias)
+    └── SOCRATIC_RED_TEAMING.md               # 10. Checking the Rubric (Prompts to fight addition bias)
 ```
 
 ---
