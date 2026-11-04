@@ -646,6 +646,44 @@ def verify_test_suite_quality(repo_root: str = REPO_ROOT) -> List[str]:
     return errors
 
 
+def verify_shared_library_type_annotations(repo_root: str = REPO_ROOT) -> List[str]:
+    """
+    Enforce 100% function type-annotation coverage across `common/shared/` (excluding tests)
+    so `pack_context.py` AST symbol outlines always expose explicit contracts (AGENTS.md Rule 4).
+    """
+    errors: List[str] = []
+    shared_dir = os.path.join(repo_root, "common", "shared")
+    if not os.path.isdir(shared_dir):
+        return errors
+
+    for root, dirs, files in os.walk(shared_dir):
+        dirs[:] = [d for d in dirs if d not in {"__pycache__", "tests", ".pytest_cache"}]
+        for fname in sorted(files):
+            if not fname.endswith(".py") or fname.startswith("test_"):
+                continue
+            abs_path = os.path.join(root, fname)
+            rel_path = os.path.relpath(abs_path, repo_root).replace("\\", "/")
+            try:
+                with open(abs_path, "r", encoding="utf-8") as f:
+                    tree = ast.parse(f.read(), filename=rel_path)
+            except (OSError, SyntaxError):
+                continue
+
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if node.name.startswith("__") and node.name.endswith("__"):
+                        continue
+                    has_type = node.returns is not None or any(
+                        a.annotation is not None for a in node.args.args
+                    )
+                    if not has_type:
+                        errors.append(
+                            f"{rel_path}:{node.lineno} function `{node.name}` in `common/shared/` "
+                            f"is missing parameter and return type annotations (AGENTS.md Rule 4)."
+                        )
+    return errors
+
+
 def run_all_repo_hygiene_checks(repo_root: str = REPO_ROOT) -> Tuple[bool, List[str]]:
     """Run all repository hygiene, documentation sync, and cross-boundary contract checks."""
     all_errors: List[str] = []
@@ -660,6 +698,7 @@ def run_all_repo_hygiene_checks(repo_root: str = REPO_ROOT) -> Tuple[bool, List[
         verify_sam_lambda_handler_contracts,
         verify_cross_boundary_frontend_backend_payload_contracts,
         verify_test_suite_quality,
+        verify_shared_library_type_annotations,
     ]
     for check_fn in checks:
         all_errors.extend(check_fn(repo_root))

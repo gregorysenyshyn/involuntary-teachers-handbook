@@ -82,6 +82,17 @@ VAGUE_FUNCTION_NAMES = {
     "test",
 }
 
+PROTOCOL_OR_ENTRYPOINT_NAMES = {
+    "main",
+    "default",
+    "cli",
+    "filter",
+    "decorator",
+    "wrapper",
+    "constructor",
+    "representer",
+}
+
 EXCLUDED_DIRS = {
     ".git",
     ".venv",
@@ -239,7 +250,22 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
                             typed_py_functions += 1
 
                         clean_name = node.name.strip("_")
-                        if clean_name.lower() in VAGUE_FUNCTION_NAMES:
+                        arg_names = [a.arg for a in node.args.args]
+                        is_property = any(
+                            isinstance(d, ast.Name) and d.id == "property"
+                            for d in node.decorator_list
+                        )
+                        is_lambda_entrypoint = clean_name == "handler" and arg_names[:2] == [
+                            "event",
+                            "context",
+                        ]
+                        if (
+                            clean_name in PROTOCOL_OR_ENTRYPOINT_NAMES
+                            or is_property
+                            or is_lambda_entrypoint
+                        ):
+                            semantically_dense_functions += 1
+                        elif clean_name.lower() in VAGUE_FUNCTION_NAMES:
                             if len(vague_functions) < 10:
                                 vague_functions.append(f"{rel_path}:{node.lineno} (`{node.name}`)")
                         elif "_" in clean_name or len(clean_name) >= 12:
