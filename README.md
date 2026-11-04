@@ -48,17 +48,18 @@ involuntary-teachers-handbook/
 ├── AGENTS.md                                 # 1. The Course Syllabus (16 drop-in classroom rules)
 ├── tools/
 │   ├── pack_context.py                       # 2. The Study Guide Generator (Zero-dep AST context packer)
-│   └── diagnose_stack.py                     # 3. Descriptive Feedback (EarlyValidation & import debugger)
+│   ├── diagnose_stack.py                     # 3. Descriptive Feedback (EarlyValidation & import debugger)
+│   └── validate_repo_hygiene.py              # 4. Mechanical Hall Monitor (Enforces AGENTS.md, map/schema sync & JS/Py contracts)
 ├── templates/
-│   ├── CODEBASE_MAP.md                       # 4. The Campus Map (1-read microservice & port directory)
-│   └── SCHEMA_DICTIONARY.md                  # 5. The Vocabulary List (1-read database & payload contracts)
+│   ├── CODEBASE_MAP.md                       # 5. The Campus Map (1-read microservice & port directory)
+│   └── SCHEMA_DICTIONARY.md                  # 6. The Vocabulary List (1-read database & payload contracts)
 ├── examples/
-│   └── self-healing-loop/                    # 6. Self-Grading Homework (Overnight Auto-Heal Loop)
+│   └── self-healing-loop/                    # 7. Self-Grading Homework (Overnight Auto-Heal Loop)
 │       ├── error_reporter.py                 #    Lambda @github_error_reporter + PII-masked SNS publisher
 │       ├── client-error-listener.js          #    Browser JS / unhandledrejection / CSP error forwarder
 │       └── gemini-agent.yml                  #    GitHub Actions workflow (Issue -> OIDC Sandbox -> PR)
 └── prompts/
-    └── SOCRATIC_RED_TEAMING.md               # 7. Checking the Rubric (Prompts to fight addition bias)
+    └── SOCRATIC_RED_TEAMING.md               # 8. Checking the Rubric (Prompts to fight addition bias)
 ```
 
 ---
