@@ -144,13 +144,26 @@ def main() -> None:
         return
 
     pytest_bin = os.path.join(REPO_ROOT, ".venv", "bin", "pytest")
-    cmd = [pytest_bin if os.path.isfile(pytest_bin) else sys.executable, "-m", "pytest"]
-    if os.path.isfile(pytest_bin):
-        cmd = [pytest_bin]
-    cmd.extend(targets)
+    base_cmd = [pytest_bin] if os.path.isfile(pytest_bin) else [sys.executable, "-m", "pytest"]
 
-    res = subprocess.run(cmd, cwd=REPO_ROOT)
-    sys.exit(res.returncode)
+    env = os.environ.copy()
+    common_dir = os.path.join(REPO_ROOT, "common")
+    existing_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{common_dir}:{REPO_ROOT}" + (f":{existing_pp}" if existing_pp else "")
+
+    # Run each microservice test suite in its own isolated Python process so top-level
+    # module names (like `main`, `dashboard`, `adapters.db`) never collide in sys.modules!
+    failed_targets: List[str] = []
+    for target in targets:
+        print(f"\n▶ Running isolated suite: {target}")
+        res = subprocess.run([*base_cmd, target], cwd=REPO_ROOT, env=env)
+        if res.returncode != 0:
+            failed_targets.append(target)
+
+    if failed_targets:
+        print(f"\n❌ Failed suites: {failed_targets}")
+        sys.exit(1)
+    print(f"\n✅ All {len(targets)} impacted test suites passed in isolated processes!")
 
 
 if __name__ == "__main__":
