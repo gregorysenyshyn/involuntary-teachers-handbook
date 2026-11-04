@@ -31,33 +31,8 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Default line limit for all first-party source files (AGENTS.md Rule 7)
 DEFAULT_MAX_SOURCE_LINES = 1000
 
-# Ratcheting ceiling for pre-existing >1,000-line files.
-# Existing files may shrink (and should be removed from this dict once <=1,000 lines),
-# but may NEVER grow past their recorded ceiling, and no new file may exceed 1,000 lines.
-LEGACY_MONOLITH_LINE_CEILINGS: Dict[str, int] = {
-    "apps/asyncacademy/src/js/account-students.js": 1240,
-    "apps/asyncacademy/src/partials/account-form.html": 1234,
-    "apps/english/src/js/scripts.js": 1702,
-    "apps/exam/src/js/exam.js": 1529,
-    "apps/gregorysenyshyn/src/js/teleprompter.js": 1379,
-    "apps/history-simulator/src/js/dashboard.js": 4485,
-    "apps/history-simulator/src/pages/index.html": 1052,
-    "apps/music/src/js/scripts.js": 3155,
-    "apps/ontarioliteracy/src/js/dashboard.js": 1032,
-    "apps/ontarioliteracy/src/pages/main/olc4o-orientation.html": 1364,
-    "apps/ontarioliteracy/src/pages/main/olc4o-workspace.html": 2778,
-    "apps/phys-ed/src/js/scripts.js": 3119,
-    "apps/phys-ed/src/pages/index.html": 1574,
-    "apps/top-secret-area/src/js/marking-dashboard.js": 2258,
-    "apps/top-secret-area/src/js/students-admin.js": 1652,
-    "apps/top-secret-area/src/pages/emails.html": 1032,
-    "apps/top-secret-area/src/pages/marking-dashboard.html": 1291,
-    "apps/top-secret-area/src/pages/students.html": 1305,
-    "apps/violet/src/styles.css": 1061,
-    "apps/yogaanarchy/src/pages/diagnostic.html": 1189,
-    "apps/yogaanarchy/src/pages/poselab.html": 2220,
-    "apps/yogaanarchy/src/pages/timeline.html": 1909,
-}
+# Zero-tolerance for >1,000-line first-party source files (AGENTS.md Rule 7).
+LEGACY_MONOLITH_LINE_CEILINGS: Dict[str, int] = {}
 
 # Zero-tolerance for silent `except ...: pass` blocks in production Python modules (AGENTS.md Rule 2).
 LEGACY_SILENT_EXCEPT_PASS_CEILINGS: Dict[str, int] = {}
@@ -78,7 +53,7 @@ CROSS_BOUNDARY_PAYLOAD_CONTRACTS: List[Dict[str, object]] = [
     },
     {
         "name": "Proctored Exam Client -> Marking Queue Submit Lambda",
-        "frontend_js": "apps/exam/src/js/exam.js",
+        "frontend_js": "apps/exam/src/js/exam-submission.js",
         "backend_py": "apps/marking-queue/src/functions/admin/marking_queue_submit/actions/submit.py",
         "required_keys": [
             "course_code",

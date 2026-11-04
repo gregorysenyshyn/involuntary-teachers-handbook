@@ -33,6 +33,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 class _CloudFormationYamlLoader(yaml.SafeLoader):
     """YAML SafeLoader that preserves AWS CloudFormation intrinsic tags (`!Ref`, `!Sub`, etc.)."""
 
+    yaml_constructors = yaml.SafeLoader.yaml_constructors.copy()
+    yaml_multi_constructors: dict[Any, Any] = {}
+
 
 def _construct_cfn_tag(loader: yaml.SafeLoader, tag_suffix: str, node: yaml.Node) -> Any:
     tag_key = f"!{tag_suffix}"
@@ -105,8 +108,12 @@ def _resolve_cfn_value(
     """Resolve CloudFormation `!Ref`, `!Sub`, `!GetAtt`, and `!If` expressions into strings."""
     if value is None:
         return ""
-    if isinstance(value, (str, int, float, bool)):
+    if isinstance(value, (int, float, bool)):
         return str(value)
+    if isinstance(value, str):
+        if "${" not in value:
+            return value
+        value = {"!Sub": value}
     if isinstance(value, dict):
         if "!Ref" in value:
             ref_target = str(value["!Ref"])
