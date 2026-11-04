@@ -36,8 +36,8 @@ Using the exact classroom rules, AST context packers, and self-healing loops in 
 | **Cloud Hosting Cost** | **<$25/month per environment** (`dev` & `prod` in AWS `ca-central-1` with 4-layer WORM backups & budget kill switches) |
 | **AI Coding Spend** | **$25/month Google AI Plan** (Zero $1,000/month API token overages) |
 
-> **🍎 PD Days for Grown-Ups (Team Training & Repo Audits):**  
-> *I don't just work with kids—I also do trainings for grown-ups.* Book a standalone **1-Day PD Day (Socratic Red-Teaming Clinic)** on your existing repo or the flagship **4-Part Monorepo Makeover** at **[gregorysenyshyn.com/training](https://gregorysenyshyn.com/training)**.
+> **🍎 PD Days for Grown-Ups (Repo Audits & Team Training):**  
+> *I don't just work with kids—I also do trainings for grown-ups.* Book an offline **Codebase Report Card (Async Audit & Written Roadmap)**, a live **1-Day PD Day (Socratic Red-Teaming Clinic)** on your existing repo, or the flagship **4-Part Monorepo Makeover** at **[gregorysenyshyn.com/training](https://gregorysenyshyn.com/training)**.
 
 ---
 
@@ -104,6 +104,9 @@ See [`examples/self-healing-loop/`](./examples/self-healing-loop/) for the compl
 
 **I don't just work with kids—I also do trainings for grown-ups.**
 
-If your engineering team is spending heavily on AI seats and cloud staging environments without seeing the velocity gains you were promised, I run hands-on **1-Day PD Days (Socratic Red-Teaming Clinics)** directly on your existing repo with zero infrastructure changes, and **The 4-Part Monorepo Makeover**—standing up a parallel, agentically-managed monorepo without ever touching your live production environment so your team falls back in love with your code.
+If your engineering team is spending thousands on cloud infrastructure and AI seats without seeing the velocity gains you were promised, I offer three ways to help:
+- **The Codebase Report Card (Offline Audit & Written Roadmap):** An asynchronous deep-dive into your repository, AI token burn, and cloud bill—delivering a candid, jargon-free written assessment, a prioritized 30-day action plan, and a 45-minute walkthrough call.
+- **The 1-Day PD Day (Standalone Socratic Red-Teaming Clinic):** A single hands-on day directly on your existing repo with zero infrastructure changes—installing `AGENTS.md`, AST context packing, and live Socratic Red-Teaming.
+- **The 4-Part Monorepo Makeover (Flagship):** Standing up a parallel, ultra-low-cost, agentically-managed monorepo over four weekly sessions without ever touching your live production environment so your team falls back in love with your code.
 
-👉 **[Book a 1-Day PD Day or 4-Part Monorepo Makeover at gregorysenyshyn.com/training](https://gregorysenyshyn.com/training)**
+👉 **[Book a Codebase Report Card, 1-Day PD Day, or 4-Part Monorepo Makeover at gregorysenyshyn.com/training](https://gregorysenyshyn.com/training)**
