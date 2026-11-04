@@ -37,7 +37,7 @@ Using the exact classroom rules, AST context packers, and self-healing loops in 
 | **AI Coding Spend** | **$25/month Google AI Plan** (Zero $1,000/month API token overages) |
 
 > **🍎 PD Days for Grown-Ups (Team Training & Repo Audits):**  
-> *I don't just work with kids—I also do trainings for grown-ups.* Book a standalone **1-Day Socratic Red-Teaming Clinic** on your existing repo or the flagship **4-Week Team Transformation Sprint** at **[gregorysenyshyn.com/training](https://gregorysenyshyn.com/training)**.
+> *I don't just work with kids—I also do trainings for grown-ups.* Book a standalone **1-Day PD Day (Socratic Red-Teaming Clinic)** on your existing repo or the flagship **4-Part Monorepo Makeover** at **[gregorysenyshyn.com/training](https://gregorysenyshyn.com/training)**.
 
 ---
 
@@ -104,6 +104,6 @@ See [`examples/self-healing-loop/`](./examples/self-healing-loop/) for the compl
 
 **I don't just work with kids—I also do trainings for grown-ups.**
 
-If your engineering team is spending heavily on AI seats and cloud staging environments without seeing the velocity gains you were promised, I run hands-on **1-Day Socratic Red-Teaming Clinics** (directly on your existing repo with zero infrastructure changes) and **4-Week Team Transformation Sprints** (standing up a parallel, agentically-managed monorepo without ever touching your live production environment).
+If your engineering team is spending heavily on AI seats and cloud staging environments without seeing the velocity gains you were promised, I run hands-on **1-Day PD Days (Socratic Red-Teaming Clinics)** directly on your existing repo with zero infrastructure changes, and **The 4-Part Monorepo Makeover**—standing up a parallel, agentically-managed monorepo without ever touching your live production environment so your team falls back in love with your code.
 
-👉 **[Book a PD Day / Explore the 4-Session Team Training Program at gregorysenyshyn.com/training](https://gregorysenyshyn.com/training)**
+👉 **[Book a 1-Day PD Day or 4-Part Monorepo Makeover at gregorysenyshyn.com/training](https://gregorysenyshyn.com/training)**
