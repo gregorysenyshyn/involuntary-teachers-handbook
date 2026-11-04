@@ -225,9 +225,19 @@ def audit_repository_and_generate_report_card(
     structured_prod_logs = 0
     missing_http_timeouts: List[str] = []
     uncached_boto3_calls: List[str] = []
+    total_js_functions = 0
+    dense_js_functions = 0
+    typed_js_functions = 0
+    js_console_logs = 0
+    js_structured_logs = 0
+    js_missing_fetch_timeouts = 0
     ast_clone_buckets: Dict[str, List[Tuple[int, str]]] = defaultdict(list)
 
     empty_js_catch_re = re.compile(r"catch\s*(?:\([^)]*\))?\s*\{\s*\}")
+    js_fn_decl_re = re.compile(
+        r"(?:function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([^)]*)\)|"
+        r"(?:const|let)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*(?::\s*[^=]+)?=>)"
+    )
     iam_arn_re = re.compile(r"arn:aws:iam::\d{12}:role/")
     http_fns = {
         "urlopen",
@@ -306,10 +316,32 @@ def audit_repository_and_generate_report_card(
                 and "/scripts/" not in f"/{rel_path}"
             )
 
-            if is_prod_module and fname.endswith((".js", ".ts", ".tsx")):
+            if fname.endswith((".js", ".ts", ".tsx")):
                 for m in empty_js_catch_re.finditer(content):
                     line_no = content[: m.start()].count("\n") + 1
                     silent_js_catches.append(f"{rel_path}:{line_no}")
+                for fm in js_fn_decl_re.finditer(content):
+                    fn_name = fm.group(1) or fm.group(3) or ""
+                    fn_args = fm.group(2) if fm.group(1) else (fm.group(4) or "")
+                    if not fn_name:
+                        continue
+                    total_js_functions += 1
+                    if fname.endswith((".ts", ".tsx")) and (":" in fn_args or "):" in fm.group(0)):
+                        typed_js_functions += 1
+                    if fn_name.lower() not in VAGUE_FUNCTION_NAMES and (
+                        len(fn_name) >= 10
+                        or "_" in fn_name
+                        or any(c.isupper() for c in fn_name[1:])
+                    ):
+                        dense_js_functions += 1
+                js_console_logs += len(re.findall(r"\bconsole\.log\s*\(", content))
+                js_structured_logs += len(
+                    re.findall(r"\b(?:logger|log|pino|winston|console)\.(?:info|warn|error)\s*\(", content)
+                )
+                for fetch_m in re.finditer(r"\bfetch\s*\(([^)]{0,240})\)", content):
+                    fetch_args = fetch_m.group(1)
+                    if "signal" not in fetch_args and "timeout" not in fetch_args:
+                        js_missing_fetch_timeouts += 1
 
             if fname.endswith(".py"):
                 try:
@@ -403,10 +435,14 @@ def audit_repository_and_generate_report_card(
     monolith_ratio = len(monoliths_over_1000) / total_src
     context_score = max(0.0, min(100.0, 100.0 - (monolith_ratio * 350.0)))
 
-    # 3. AST Comprehensibility Score
+    # 3. AST Comprehensibility Score (Python AST primary; JS/TS fallback for pure JS/TS repos)
     if total_py_functions > 0:
         dense_pct = (semantically_dense_functions / total_py_functions) * 100.0
         type_pct = (typed_py_functions / total_py_functions) * 100.0
+        comprehensibility_score = min(100.0, (dense_pct * 0.65) + (type_pct * 0.35) + 15.0)
+    elif total_js_functions > 0:
+        dense_pct = (dense_js_functions / total_js_functions) * 100.0
+        type_pct = (typed_js_functions / total_js_functions) * 100.0
         comprehensibility_score = min(100.0, (dense_pct * 0.65) + (type_pct * 0.35) + 15.0)
     else:
         dense_pct, type_pct, comprehensibility_score = 75.0, 50.0, 75.0
@@ -447,11 +483,16 @@ def audit_repository_and_generate_report_card(
     duplicated_ast_lines = sum(total_l for total_l, _, _ in clone_clusters)
     clone_score = max(0.0, min(100.0, 100.0 - (len(clone_clusters) * 4.0)))
 
-    # 8. Observability & PII-Safe Logging (Structured logger.* vs raw print() bypasses)
-    observability_score = max(0.0, min(100.0, 100.0 - (len(raw_prod_prints) * 1.5)))
+    # 8. Observability & PII-Safe Logging (Structured logger.* vs raw print()/console.log() bypasses)
+    effective_raw_prints = len(raw_prod_prints) if total_py_functions > 0 else js_console_logs
+    effective_structured_logs = structured_prod_logs if total_py_functions > 0 else js_structured_logs
+    observability_score = max(0.0, min(100.0, 100.0 - (effective_raw_prints * 1.5)))
 
     # 9. Serverless Runtime & Cold-Start Hygiene (HTTP timeouts & cached boto3 clients)
-    runtime_penalties = (len(missing_http_timeouts) * 15.0) + (len(uncached_boto3_calls) * 5.0)
+    effective_missing_timeouts = (
+        len(missing_http_timeouts) if total_py_functions > 0 else js_missing_fetch_timeouts
+    )
+    runtime_penalties = (effective_missing_timeouts * 15.0) + (len(uncached_boto3_calls) * 5.0)
     runtime_score = max(0.0, min(100.0, 100.0 - runtime_penalties))
 
     overall_score = (
@@ -512,8 +553,8 @@ def audit_repository_and_generate_report_card(
 | **5. Self-Assessment & Mock Fidelity** | **{score_to_letter_grade(testing_score)}** | {testing_score:.0f}/100 | **{len(test_files)}** test suites · **{total_assertions:,}** assertions · **{unspecced_test_patches}** un-specced `patch()` calls |
 | **6. Blast Radius & IaC Isolation** | **{score_to_letter_grade(iac_score)}** | {iac_score:.0f}/100 | **{len(cfn_import_values)}** `Fn::ImportValue` deadlocks · **{len(hardcoded_iam_arns)}** hardcoded IAM ARNs |
 | **7. Structural AST Clone Hygiene (DRY)** | **{score_to_letter_grade(clone_score)}** | {clone_score:.0f}/100 | **{len(clone_clusters)}** AST clone clusters ({duplicated_ast_lines} duplicated lines across functions >=12 lines) |
-| **8. Observability & PII-Safe Logging** | **{score_to_letter_grade(observability_score)}** | {observability_score:.0f}/100 | **{structured_prod_logs:,}** structured `logger.*` calls · **{len(raw_prod_prints)}** raw `print()` bypasses in prod |
-| **9. Serverless Runtime & Cold-Start Hygiene** | **{score_to_letter_grade(runtime_score)}** | {runtime_score:.0f}/100 | **{len(missing_http_timeouts)}** HTTP calls missing `timeout=` · **{len(uncached_boto3_calls)}** uncached `boto3` calls |
+| **8. Observability & PII-Safe Logging** | **{score_to_letter_grade(observability_score)}** | {observability_score:.0f}/100 | **{effective_structured_logs:,}** structured `logger.*` calls · **{effective_raw_prints}** raw `print()`/`console.log()` bypasses |
+| **9. Serverless Runtime & Cold-Start Hygiene** | **{score_to_letter_grade(runtime_score)}** | {runtime_score:.0f}/100 | **{effective_missing_timeouts}** HTTP calls missing `timeout=` · **{len(uncached_boto3_calls)}** uncached `boto3` calls |
 
 ---
 

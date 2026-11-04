@@ -81,7 +81,19 @@ When AWS CloudFormation rejects a ChangeSet with `EarlyValidation::ResourceExist
 
 ---
 
-## 🚀 First Day of School: Set Up Your Repo in 2 Minutes
+## 🚀 First Day of School: Grade Your Repo in 3 Seconds
+
+Run the zero-dependency **Codebase Report Card Generator** locally against any Python, TypeScript, or JavaScript repository (no clone or API key required):
+
+```bash
+curl -sSL https://raw.githubusercontent.com/gregorysenyshyn/involuntary-teachers-handbook/main/tools/generate_report_card.py | python3 - /path/to/your/repo
+```
+
+Or customize your team's monthly AI spend and headcount to calculate your exact **Monthly Context & Rework Tax**:
+
+```bash
+python3 tools/generate_report_card.py /path/to/your/repo --monthly-ai-spend 15000 --team-size 12
+```
 
 ### 1. Hand Out the Syllabus (`AGENTS.md`)
 Copy [`AGENTS.md`](./AGENTS.md) into the root of your repository (and/or `.github/copilot-instructions.md`, `CLAUDE.md`, `.cursorrules`). It enforces:
