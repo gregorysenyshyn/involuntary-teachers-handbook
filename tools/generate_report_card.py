@@ -138,7 +138,49 @@ def score_to_letter_grade(score: float) -> str:
     return "F"
 
 
-def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict[str, object]]:
+def calculate_financial_waste_estimate(
+    overall_score: float,
+    wasted_tokens_per_turn: int,
+    monthly_ai_spend: int = 10000,
+    team_size: int = 10,
+) -> Dict[str, object]:
+    """
+    Estimate monthly AI token waste and senior engineering babysitting/rework cost
+    caused by context bloat (>1,000-line monoliths, missing maps) and retry thrashing.
+    """
+    score_gap = max(0.0, 100.0 - overall_score)
+    if score_gap == 0.0 and wasted_tokens_per_turn == 0:
+        token_waste_pct = 0
+        babysitting_hours_per_dev_week = 0.0
+    else:
+        token_waste_pct = int(
+            min(75.0, round((score_gap * 1.15) + min(25.0, wasted_tokens_per_turn / 4000.0)))
+        )
+        babysitting_hours_per_dev_week = round(
+            min(10.0, (score_gap * 0.11) + min(2.5, wasted_tokens_per_turn / 40000.0)), 1
+        )
+
+    wasted_ai_dollars_monthly = int(round(monthly_ai_spend * (token_waste_pct / 100.0)))
+    # Conservative $90/hr loaded engineering cost * 4.33 weeks/month
+    babysitting_dollars_monthly = int(
+        round(team_size * babysitting_hours_per_dev_week * 4.33 * 90.0)
+    )
+    total_monthly_waste = wasted_ai_dollars_monthly + babysitting_dollars_monthly
+    return {
+        "token_waste_pct": token_waste_pct,
+        "wasted_ai_dollars_monthly": wasted_ai_dollars_monthly,
+        "babysitting_hours_per_dev_week": babysitting_hours_per_dev_week,
+        "babysitting_dollars_monthly": babysitting_dollars_monthly,
+        "total_monthly_waste": total_monthly_waste,
+        "annual_recoverable_savings": total_monthly_waste * 12,
+    }
+
+
+def audit_repository_and_generate_report_card(
+    repo_path: str,
+    monthly_ai_spend: int = 10000,
+    team_size: int = 10,
+) -> Tuple[str, Dict[str, object]]:
     """Scan a target repository and return a formatted Markdown Report Card and metrics dict."""
     repo_root = os.path.abspath(repo_path)
     repo_name = os.path.basename(repo_root)
@@ -445,6 +487,18 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
         else "  - None! Zero structural AST clone clusters (>=12 lines) detected."
     )
 
+    roi = calculate_financial_waste_estimate(
+        overall_score=overall_score,
+        wasted_tokens_per_turn=wasted_tokens_per_turn,
+        monthly_ai_spend=monthly_ai_spend,
+        team_size=team_size,
+    )
+    calculator_url = (
+        f"https://gregorysenyshyn.com/training"
+        f"?score={overall_score:.0f}&grade={overall_grade}"
+        f"&monoliths={len(monoliths_over_1000)}&tokens={wasted_tokens_per_turn}#roi-calculator"
+    )
+
     report = f"""# 📋 Codebase Report Card: `{repo_name}`
 
 **Overall Agent Readiness Grade:** **{overall_grade}** ({overall_score:.1f} / 100)
@@ -471,6 +525,16 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
 
 ---
 
+## 💸 Estimated "Bad Classroom" Token & Engineering Tax
+*(Baseline: ${monthly_ai_spend:,}/mo AI coding spend · {team_size} engineers — customize via `--monthly-ai-spend` & `--team-size`)*
+- **Estimated AI Token Waste Rate:** **{roi['token_waste_pct']}%** (**~${roi['wasted_ai_dollars_monthly']:,}/mo** burned re-reading monoliths, grepping without a map, & retrying failed loops)
+- **Senior Dev Babysitting & PR Rework Tax:** **~{roi['babysitting_hours_per_dev_week']} hrs/dev/wk** (**~${roi['babysitting_dollars_monthly']:,}/mo** in lost engineering velocity)
+- **Total Recoverable Monthly Waste:** **~${roi['total_monthly_waste']:,}/mo** (**~${roi['annual_recoverable_savings']:,}/yr**)
+- **Interactive ROI & Payback Calculator (Pre-loaded with this repo's score):**  
+  👉 **[Open Your Personalized ROI & Payback Estimator]({calculator_url})**
+
+---
+
 ## 🛠️ Prioritized 30-Day Remediation Roadmap
 1. **Install the Classroom Syllabus:** {'Already installed (`AGENTS.md`, `CODEBASE_MAP.md`, `SCHEMA_DICTIONARY.md`).' if (has_agents_md and has_codebase_map and has_schema_dict) else 'Add `AGENTS.md`, `CODEBASE_MAP.md`, and `SCHEMA_DICTIONARY.md` so coding agents stop burning 40,000 tokens grepping for architecture boundaries.'}
 2. **Split Monoliths into Declarative Manifests:** {f'Extract static data/prompts from the {len(monoliths_over_1000)} files over 1,000 lines to save ~{wasted_tokens_per_turn:,} tokens per agent read.' if monoliths_over_1000 else 'Keep enforcing the <1,000-line ceiling via `validate_repo_hygiene.py`.'}
@@ -491,6 +555,9 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
         "uncached_boto3_calls": len(uncached_boto3_calls),
         "test_files": len(test_files),
         "source_files": len(source_files),
+        "token_waste_pct": roi["token_waste_pct"],
+        "wasted_ai_dollars_monthly": roi["wasted_ai_dollars_monthly"],
+        "total_monthly_waste": roi["total_monthly_waste"],
     }
     return report, metrics
 
@@ -510,9 +577,25 @@ def main() -> None:
         "-o",
         help="Optional file path to write the Markdown Report Card.",
     )
+    parser.add_argument(
+        "--monthly-ai-spend",
+        type=int,
+        default=10000,
+        help="Monthly team AI coding spend in USD/CAD for waste estimation (default: 10000).",
+    )
+    parser.add_argument(
+        "--team-size",
+        type=int,
+        default=10,
+        help="Number of software engineers on the team for rework estimation (default: 10).",
+    )
     args = parser.parse_args()
 
-    report_md, _ = audit_repository_and_generate_report_card(args.repo_path)
+    report_md, _ = audit_repository_and_generate_report_card(
+        args.repo_path,
+        monthly_ai_spend=args.monthly_ai_spend,
+        team_size=args.team_size,
+    )
     if args.output:
         with open(args.output, "w", encoding="utf-8") as f:
             f.write(report_md)
