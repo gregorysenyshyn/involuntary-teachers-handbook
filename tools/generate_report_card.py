@@ -170,6 +170,7 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
     source_files: List[Tuple[int, int, str]] = []  # (lines, chars, rel_path)
     test_files: List[str] = []
     total_assertions = 0
+    unspecced_test_patches = 0
     total_py_functions = 0
     typed_py_functions = 0
     semantically_dense_functions = 0
@@ -178,10 +179,25 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
     silent_js_catches: List[str] = []
     cfn_import_values: List[str] = []
     hardcoded_iam_arns: List[str] = []
+    raw_prod_prints: List[str] = []
+    structured_prod_logs = 0
+    missing_http_timeouts: List[str] = []
+    uncached_boto3_calls: List[str] = []
     ast_clone_buckets: Dict[str, List[Tuple[int, str]]] = defaultdict(list)
 
     empty_js_catch_re = re.compile(r"catch\s*(?:\([^)]*\))?\s*\{\s*\}")
     iam_arn_re = re.compile(r"arn:aws:iam::\d{12}:role/")
+    http_fns = {
+        "urlopen",
+        "urllib.request.urlopen",
+        "requests.get",
+        "requests.post",
+        "requests.put",
+        "requests.delete",
+        "requests.patch",
+        "requests.request",
+    }
+    log_methods = {"info", "warning", "error", "debug", "critical", "exception"}
 
     for root, dirs, files in os.walk(repo_root):
         dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
@@ -210,6 +226,7 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
                 "/tests/" in f"/{rel_path}"
                 or fname.startswith("test_")
                 or fname.endswith((".test.js", ".test.ts", ".spec.js", ".spec.ts"))
+                or rel_path.startswith("common/testing/")
             )
             try:
                 with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -219,13 +236,33 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
 
             line_count = content.count("\n") + 1
             if is_test:
-                test_files.append(rel_path)
-                total_assertions += len(re.findall(r"\b(?:assert|expect)\b", content))
+                if not rel_path.startswith("common/testing/"):
+                    test_files.append(rel_path)
+                    total_assertions += len(re.findall(r"\b(?:assert|expect)\b", content))
+                    if fname.endswith(".py") and "strict_patch" not in content:
+                        try:
+                            test_tree = ast.parse(content, filename=rel_path)
+                            for tnode in ast.walk(test_tree):
+                                if isinstance(tnode, ast.Call):
+                                    fn_str = ast.unparse(tnode.func)
+                                    if fn_str in ("patch", "unittest.mock.patch", "mock.patch"):
+                                        kw_names = {k.arg for k in tnode.keywords if k.arg}
+                                        if len(tnode.args) == 1 and not (
+                                            kw_names
+                                            & {"autospec", "spec", "spec_set", "new", "new_callable"}
+                                        ):
+                                            unspecced_test_patches += 1
+                        except SyntaxError:
+                            pass
                 continue
 
             source_files.append((line_count, len(content), rel_path))
 
             is_prod_module = rel_path.startswith(("apps/", "common/")) and "/scripts/" not in f"/{rel_path}"
+            is_prod_lambda_or_shared = (
+                (rel_path.startswith("common/shared/") or (rel_path.startswith("apps/") and "/src/" in f"/{rel_path}"))
+                and "/scripts/" not in f"/{rel_path}"
+            )
 
             if is_prod_module and fname.endswith((".js", ".ts", ".tsx")):
                 for m in empty_js_catch_re.finditer(content):
@@ -239,7 +276,34 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
                     continue
 
                 for node in ast.walk(tree):
+                    if is_prod_lambda_or_shared and isinstance(node, ast.Call):
+                        fn_str = ast.unparse(node.func)
+                        if isinstance(node.func, ast.Name) and node.func.id == "print":
+                            raw_prod_prints.append(f"{rel_path}:{node.lineno}")
+                        elif isinstance(node.func, ast.Attribute) and node.func.attr in log_methods:
+                            structured_prod_logs += 1
+                        if fn_str in http_fns:
+                            kw_names = {k.arg for k in node.keywords if k.arg}
+                            if "timeout" not in kw_names and len(node.args) < 3:
+                                missing_http_timeouts.append(f"{rel_path}:{node.lineno} (`{fn_str}`)")
+
                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        if is_prod_lambda_or_shared:
+                            has_global = any(isinstance(n, ast.Global) for n in ast.walk(node))
+                            has_cache_dec = any("cache" in ast.unparse(d) for d in node.decorator_list)
+                            if not (
+                                has_global
+                                or has_cache_dec
+                                or node.name.startswith(("get_", "_get_", "__init__"))
+                            ):
+                                for sub in ast.walk(node):
+                                    if isinstance(sub, ast.Call) and ast.unparse(sub.func) in (
+                                        "boto3.client",
+                                        "boto3.resource",
+                                    ):
+                                        uncached_boto3_calls.append(
+                                            f"{rel_path}:{sub.lineno} (`{node.name}`)"
+                                        )
                         if node.name.startswith("__") and node.name.endswith("__"):
                             continue
                         total_py_functions += 1
@@ -310,7 +374,7 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
     silent_per_100_files = (total_silent / total_src) * 100.0
     silent_score = max(0.0, min(100.0, 100.0 - (silent_per_100_files * 3.5)))
 
-    # 5. Self-Assessment Rubric Score (measured against non-stub executable modules)
+    # 5. Self-Assessment & Mock Fidelity Score (measured against non-stub executable modules)
     executable_files = [
         x
         for x in source_files
@@ -324,7 +388,8 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
     has_moto_harness = os.path.isfile(os.path.join(repo_root, "common", "testing", "sam_moto_harness.py"))
     has_property_fuzzing = any("properties" in tf for tf in test_files)
     sophistication_bonus = (10.0 if has_moto_harness else 0.0) + (8.0 if has_property_fuzzing else 0.0)
-    testing_score = min(100.0, (test_ratio * 180.0) + assertion_bonus + sophistication_bonus)
+    raw_testing_score = min(100.0, (test_ratio * 180.0) + assertion_bonus + sophistication_bonus)
+    testing_score = max(0.0, raw_testing_score - (unspecced_test_patches * 1.5))
 
     # 6. Blast Radius & Cloud Cost Guardrail Score
     iac_penalties = (len(cfn_import_values) * 20.0) + (len(hardcoded_iam_arns) * 25.0)
@@ -340,14 +405,23 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
     duplicated_ast_lines = sum(total_l for total_l, _, _ in clone_clusters)
     clone_score = max(0.0, min(100.0, 100.0 - (len(clone_clusters) * 4.0)))
 
+    # 8. Observability & PII-Safe Logging (Structured logger.* vs raw print() bypasses)
+    observability_score = max(0.0, min(100.0, 100.0 - (len(raw_prod_prints) * 1.5)))
+
+    # 9. Serverless Runtime & Cold-Start Hygiene (HTTP timeouts & cached boto3 clients)
+    runtime_penalties = (len(missing_http_timeouts) * 15.0) + (len(uncached_boto3_calls) * 5.0)
+    runtime_score = max(0.0, min(100.0, 100.0 - runtime_penalties))
+
     overall_score = (
-        (world_model_score * 0.20)
+        (world_model_score * 0.15)
         + (context_score * 0.15)
         + (comprehensibility_score * 0.15)
-        + (silent_score * 0.15)
+        + (silent_score * 0.10)
         + (testing_score * 0.15)
         + (iac_score * 0.10)
         + (clone_score * 0.10)
+        + (observability_score * 0.05)
+        + (runtime_score * 0.05)
     )
     overall_grade = score_to_letter_grade(overall_score)
 
@@ -381,9 +455,11 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
 | **2. Context Window Tax (Monolith Bloat)** | **{score_to_letter_grade(context_score)}** | {context_score:.0f}/100 | **{len(monoliths_over_1000)}** / {len(source_files)} files exceed 1,000 lines (~{wasted_tokens_per_turn:,} excess tokens/turn) |
 | **3. AST Comprehensibility & Naming** | **{score_to_letter_grade(comprehensibility_score)}** | {comprehensibility_score:.0f}/100 | **{dense_pct:.0f}%** semantically-dense function names · **{type_pct:.0f}%** type-annotated |
 | **4. Silent Failure Hygiene** | **{score_to_letter_grade(silent_score)}** | {silent_score:.0f}/100 | **{len(silent_py_excepts)}** silent Python `except: pass` · **{len(silent_js_catches)}** empty JS `catch {{}}` |
-| **5. Self-Assessment Coverage** | **{score_to_letter_grade(testing_score)}** | {testing_score:.0f}/100 | **{len(test_files)}** test suites · **{total_assertions:,}** assertions across {len(executable_files)} code modules |
+| **5. Self-Assessment & Mock Fidelity** | **{score_to_letter_grade(testing_score)}** | {testing_score:.0f}/100 | **{len(test_files)}** test suites · **{total_assertions:,}** assertions · **{unspecced_test_patches}** un-specced `patch()` calls |
 | **6. Blast Radius & IaC Isolation** | **{score_to_letter_grade(iac_score)}** | {iac_score:.0f}/100 | **{len(cfn_import_values)}** `Fn::ImportValue` deadlocks · **{len(hardcoded_iam_arns)}** hardcoded IAM ARNs |
 | **7. Structural AST Clone Hygiene (DRY)** | **{score_to_letter_grade(clone_score)}** | {clone_score:.0f}/100 | **{len(clone_clusters)}** AST clone clusters ({duplicated_ast_lines} duplicated lines across functions >=12 lines) |
+| **8. Observability & PII-Safe Logging** | **{score_to_letter_grade(observability_score)}** | {observability_score:.0f}/100 | **{structured_prod_logs:,}** structured `logger.*` calls · **{len(raw_prod_prints)}** raw `print()` bypasses in prod |
+| **9. Serverless Runtime & Cold-Start Hygiene** | **{score_to_letter_grade(runtime_score)}** | {runtime_score:.0f}/100 | **{len(missing_http_timeouts)}** HTTP calls missing `timeout=` · **{len(uncached_boto3_calls)}** uncached `boto3` calls |
 
 ---
 
@@ -409,6 +485,10 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
         "monoliths_over_1000": len(monoliths_over_1000),
         "silent_failures": total_silent,
         "ast_clone_clusters": len(clone_clusters),
+        "unspecced_test_patches": unspecced_test_patches,
+        "raw_prod_prints": len(raw_prod_prints),
+        "missing_http_timeouts": len(missing_http_timeouts),
+        "uncached_boto3_calls": len(uncached_boto3_calls),
         "test_files": len(test_files),
         "source_files": len(source_files),
     }

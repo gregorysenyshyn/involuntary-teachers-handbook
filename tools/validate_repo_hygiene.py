@@ -506,52 +506,8 @@ def verify_cross_stack_ssm_parameter_wiring(repo_root: str = REPO_ROOT) -> List[
     return errors
 
 
-LEGACY_UNSPECCED_PATCH_CEILINGS: Dict[str, int] = {
-    "apps/auth/tests/functions/admin/test_admin_student_records.py": 9,
-    "apps/auth/tests/test_activity_monitor.py": 2,
-    "apps/auth/tests/test_consume_invite.py": 19,
-    "apps/auth/tests/test_error_handler.py": 2,
-    "apps/auth/tests/test_get_registration_details.py": 2,
-    "apps/auth/tests/test_oidc_proxy.py": 2,
-    "apps/auth/tests/test_post_confirmation_fallback.py": 7,
-    "apps/auth/tests/test_pre_token_generation.py": 12,
-    "apps/email/tests/functions/test_contact_form.py": 6,
-    "apps/email/tests/functions/test_lead_capture.py": 34,
-    "apps/email/tests/functions/test_process_bounce.py": 3,
-    "apps/email/tests/functions/test_process_transactional_email.py": 3,
-    "apps/email/tests/functions/test_send_nurture_email.py": 10,
-    "apps/email/tests/functions/test_unsubscribe.py": 15,
-    "apps/helpdesk/tests/test_functions.py": 6,
-    "apps/marking-queue/tests/functions/admin/marking_queue_complete/test_lambda_function.py": 4,
-    "apps/marking-queue/tests/functions/admin/marking_queue_get/test_lambda_function.py": 10,
-    "apps/marking-queue/tests/functions/admin/marking_queue_submit/test_lambda_function.py": 2,
-    "apps/marking-queue/tests/functions/prepare_transcode/test_lambda_function.py": 1,
-    "apps/marking-queue/tests/test_adapters_db.py": 2,
-    "apps/math-engine/tests/test_compiler.py": 1,
-    "apps/music/tests/test_music_practice_logic.py": 3,
-    "apps/ontarioliteracy/tests/test_dashboard.py": 1,
-    "apps/ontarioliteracy/tests/test_newsletter_sender.py": 5,
-    "apps/ontarioliteracy/tests/test_practice_feedback.py": 7,
-    "apps/ontarioliteracy/tests/test_scoring.py": 28,
-    "apps/ontarioliteracy/tests/test_scoring_worker.py": 2,
-    "apps/ontarioliteracy/tests/test_submit_result.py": 3,
-    "apps/phys-ed/tests/test_phys_ed_logic.py": 15,
-    "apps/phys-ed/tests/test_phys_ed_utils.py": 2,
-    "apps/scheduler/tests/test_count_future.py": 2,
-    "apps/scheduler/tests/test_list_appointments.py": 1,
-    "apps/security/tests/test_error_ticket_creator.py": 4,
-    "apps/security/tests/test_refactored_functions.py": 10,
-    "apps/social-poster/tests/test_get_presigned_url.py": 1,
-    "apps/social-poster/tests/test_process_post_queue.py": 3,
-    "apps/social-poster/tests/test_schedule_post.py": 5,
-    "apps/top-secret-area/tests/functions/admin/ai_settings/test_main.py": 2,
-    "apps/top-secret-area/tests/functions/admin/dashboard/test_dashboard.py": 9,
-    "apps/top-secret-area/tests/functions/admin/journey/test_journey.py": 22,
-    "apps/top-secret-area/tests/functions/admin/report_card/test_report_card.py": 27,
-    "tools/tests/test_aws_audit.py": 2,
-    "tools/tests/test_manage.py": 18,
-    "tools/tests/test_ssm_ensure_secrets.py": 3,
-}
+# Zero-tolerance for un-specced `patch(...)` calls across all test suites.
+LEGACY_UNSPECCED_PATCH_CEILINGS: Dict[str, int] = {}
 
 
 def verify_test_suite_quality(repo_root: str = REPO_ROOT) -> List[str]:
@@ -684,6 +640,144 @@ def verify_shared_library_type_annotations(repo_root: str = REPO_ROOT) -> List[s
     return errors
 
 
+def verify_no_raw_print_in_production_modules(repo_root: str = REPO_ROOT) -> List[str]:
+    """
+    Block raw `print(...)` calls in `common/shared/` and `apps/*/src/` (excluding `/scripts/`,
+    `/tests/`, and `layer/`) so `PiiScrubbingFilter` and structured log levels are never bypassed.
+    """
+    errors: List[str] = []
+    excluded_dirs = {
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        "dist",
+        "build",
+        ".aws-sam",
+        "__pycache__",
+        "vendor",
+        "reveal",
+        ".build",
+        "layer",
+        "coverage",
+        "tests",
+        "scripts",
+    }
+
+    for base in ("apps", "common/shared"):
+        base_dir = os.path.join(repo_root, base)
+        if not os.path.isdir(base_dir):
+            continue
+        for root, dirs, files in os.walk(base_dir):
+            dirs[:] = [d for d in dirs if d not in excluded_dirs]
+            for fname in sorted(files):
+                if not fname.endswith(".py") or fname.startswith("test_"):
+                    continue
+                abs_path = os.path.join(root, fname)
+                rel_path = os.path.relpath(abs_path, repo_root).replace("\\", "/")
+                if rel_path.startswith("apps/") and "/src/" not in f"/{rel_path}":
+                    continue
+                try:
+                    with open(abs_path, "r", encoding="utf-8") as f:
+                        tree = ast.parse(f.read(), filename=rel_path)
+                except (OSError, SyntaxError):
+                    continue
+
+                print_lines = [
+                    node.lineno
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "print"
+                ]
+                if print_lines:
+                    errors.append(
+                        f"{rel_path} contains raw `print(...)` at line(s) {sorted(print_lines)}; "
+                        f"use structured `logger.info`/`warning`/`error` so `PiiScrubbingFilter` runs."
+                    )
+    return errors
+
+
+def verify_serverless_runtime_hygiene(repo_root: str = REPO_ROOT) -> List[str]:
+    """
+    Verify outbound HTTP requests specify `timeout=` and non-getter functions do not
+    instantiate uncached `boto3.client(...)` or `boto3.resource(...)` on every invocation.
+    """
+    errors: List[str] = []
+    excluded_dirs = {
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        "dist",
+        "build",
+        ".aws-sam",
+        "__pycache__",
+        "vendor",
+        "reveal",
+        ".build",
+        "layer",
+        "coverage",
+        "tests",
+        "scripts",
+    }
+    http_fns = {
+        "urlopen",
+        "urllib.request.urlopen",
+        "requests.get",
+        "requests.post",
+        "requests.put",
+        "requests.delete",
+        "requests.patch",
+        "requests.request",
+    }
+
+    for base in ("apps", "common/shared"):
+        base_dir = os.path.join(repo_root, base)
+        if not os.path.isdir(base_dir):
+            continue
+        for root, dirs, files in os.walk(base_dir):
+            dirs[:] = [d for d in dirs if d not in excluded_dirs]
+            for fname in sorted(files):
+                if not fname.endswith(".py") or fname.startswith("test_"):
+                    continue
+                abs_path = os.path.join(root, fname)
+                rel_path = os.path.relpath(abs_path, repo_root).replace("\\", "/")
+                if rel_path.startswith("apps/") and "/src/" not in f"/{rel_path}":
+                    continue
+                try:
+                    with open(abs_path, "r", encoding="utf-8") as f:
+                        tree = ast.parse(f.read(), filename=rel_path)
+                except (OSError, SyntaxError):
+                    continue
+
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Call):
+                        fn_str = ast.unparse(node.func)
+                        if fn_str in http_fns:
+                            kw_names = {k.arg for k in node.keywords if k.arg}
+                            if "timeout" not in kw_names and len(node.args) < 3:
+                                errors.append(
+                                    f"{rel_path}:{node.lineno} calls `{fn_str}(...)` without an "
+                                    f"explicit `timeout=` keyword argument."
+                                )
+                    elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        has_global = any(isinstance(n, ast.Global) for n in ast.walk(node))
+                        has_cache_dec = any("cache" in ast.unparse(d) for d in node.decorator_list)
+                        if has_global or has_cache_dec or node.name.startswith(("get_", "_get_", "__init__")):
+                            continue
+                        for sub in ast.walk(node):
+                            if isinstance(sub, ast.Call) and ast.unparse(sub.func) in (
+                                "boto3.client",
+                                "boto3.resource",
+                            ):
+                                errors.append(
+                                    f"{rel_path}:{sub.lineno} (`{node.name}`) instantiates uncached "
+                                    f"`{ast.unparse(sub.func)}` inside a non-getter function (AGENTS.md Rule 5)."
+                                )
+    return errors
+
+
 def run_all_repo_hygiene_checks(repo_root: str = REPO_ROOT) -> Tuple[bool, List[str]]:
     """Run all repository hygiene, documentation sync, and cross-boundary contract checks."""
     all_errors: List[str] = []
@@ -699,6 +793,8 @@ def run_all_repo_hygiene_checks(repo_root: str = REPO_ROOT) -> Tuple[bool, List[
         verify_cross_boundary_frontend_backend_payload_contracts,
         verify_test_suite_quality,
         verify_shared_library_type_annotations,
+        verify_no_raw_print_in_production_modules,
+        verify_serverless_runtime_hygiene,
     ]
     for check_fn in checks:
         all_errors.extend(check_fn(repo_root))
