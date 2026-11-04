@@ -95,6 +95,19 @@ Or customize your team's monthly AI spend and headcount to calculate your exact 
 python3 tools/generate_report_card.py /path/to/your/repo --monthly-ai-spend 15000 --team-size 12
 ```
 
+### Great Human Code ≠ A Great Agent Classroom (Public Repo Benchmarks)
+
+Frameworks like **FastAPI**, **Flask**, and Anthropic's official **Model Context Protocol TypeScript SDK (`mcp-ts-sdk`)** are world-class human codebases—scoring **100/100 (A+)** on human-era dimensions like type annotations, test assertion density, and naming clarity. Where they get taxed is **Agent Ergonomics**: a human in VS Code can `Cmd+Click` to line 4,200 of `fastapi/routing.py` (6,553 lines) in zero milliseconds, whereas an AI coding agent must ingest **~65,000 tokens of context window** just to read that single file.
+
+| Repository | Stack | Overall Grade | Human Hygiene (Types & Tests) | Primary "Bad Classroom" Bottleneck |
+| :--- | :--- | :---: | :--- | :--- |
+| **Async Academy Monorepo** | Python / JS | **A+ (100.0)** | **A+** (161 suites · 100% `autospec`) | 0 files >1k lines · Full syllabus (`AGENTS.md`, `CODEBASE_MAP.md`, 19 ADRs) · 0 raw `print()` calls |
+| **`openai/swarm`** | Python | **B+ (84.2)** | **A+** (92% dense · 83% typed) | 0/100 on World-Model (no `AGENTS.md` / `CODEBASE_MAP.md`) · 10 raw `print()` calls in prod modules |
+| **`fastapi/fastapi`** | Python | **B- (73.9)** | **A+** (99% typed · 6,892 asserts) | 4 monoliths burning **~123,959 excess tokens/turn** (`routing.py` at 6,553 lines, `applications.py` at 4,817 lines) · 130-line AST clone in `websocket()` · 17 un-specced `patch()` calls |
+| **`pallets/flask`** | Python | **B- (71.3)** | **A+** (99% typed · 1,028 asserts) | 3 monoliths >1k lines (`app.py` at 1,687 lines · ~21,017 excess tokens/turn) · 4 AST clone clusters (181 lines duplicated between `blueprints.py` & `app.py`) · 3 silent `except: pass` |
+| **`modelcontextprotocol/typescript-sdk`** | TypeScript | **B- (70.3)** | **A+** (90% typed · 13,137 asserts) | Has `CLAUDE.md` (35/100), but taxed by **14 monoliths >1k lines (~206,567 excess tokens/turn)**, 128 raw `console.log()` calls, and 25 `fetch()` calls missing timeouts |
+| **`expressjs/express`** | JavaScript | **C+ (67.0)** | **F (33)** naming/types · **A+** tests | Only 28% semantically-dense function names (`get`, `set`, `use`, `fn`, `cb`) & 0% type annotations · `lib/response.js` over 1,000 lines |
+
 ### 1. Hand Out the Syllabus (`AGENTS.md`)
 Copy [`AGENTS.md`](./AGENTS.md) into the root of your repository (and/or `.github/copilot-instructions.md`, `CLAUDE.md`, `.cursorrules`). It enforces:
 - **Zero Silent Fallbacks:** Fail fast with descriptive exceptions that serialize the exact failure into the agent's context window.
