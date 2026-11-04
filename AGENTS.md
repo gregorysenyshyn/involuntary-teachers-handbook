@@ -8,7 +8,7 @@ This file defines the architectural, security, and context-hygiene rules for AI 
 2. **Gold-Standard Solutions Over Quick Hacks**: Preventing the accumulation of technical debt is our primary overarching concern. **Fixing things immediately is less important than identifying underlying suboptimal patterns and implementing an enterprise-grade solution.**
 3. **Zero Silent Fallbacks**: Silent `try/except: pass` blocks and speculative fallback branches hide bugs from both humans and agents. Fail fast with descriptive exceptions that serialize the exact failure into the context window.
 4. **Red-Team the Request**: Do not act as a passive order-taker. Actively evaluate the user's request for architectural edge cases, simpler subtractive alternatives, or security blind spots, and propose a better approach when you see one.
-5. **Write for LLM Comprehensibility**: Observe conventions that require fewer reasoning tokens—explicit types, flat control flow, single-responsibility modules, and declarative JSON/YAML manifests over deeply nested imperative scripts.
+5. **Write for LLM Comprehensibility & Semantically-Dense Naming**: Observe conventions that require fewer reasoning tokens—explicit types, flat control flow, single-responsibility modules, and declarative JSON/YAML manifests over deeply nested imperative scripts. Use **semantically-dense naming conventions** for files, classes, functions, and variables (e.g., `verify_webhook_hmac_and_enqueue_grade_job(payload: dict)` instead of `process(data)`) so that AST symbol outlines from `pack_context.py` communicate the exact contract in zero extra file reads.
 
 ---
 
