@@ -112,6 +112,7 @@ EXCLUDED_DIRS = {
     "scratch",
     "graphify-out",
     "examples",
+    "docs_src",
 }
 
 
@@ -209,6 +210,9 @@ def audit_repository_and_generate_report_card(
     )
 
     # Walk repository files
+    is_glh_monorepo = os.path.isdir(os.path.join(repo_root, "apps")) and os.path.isdir(
+        os.path.join(repo_root, "common", "shared")
+    )
     source_files: List[Tuple[int, int, str]] = []  # (lines, chars, rel_path)
     test_files: List[str] = []
     total_assertions = 0
@@ -276,8 +280,10 @@ def audit_repository_and_generate_report_card(
 
             is_test = (
                 "/tests/" in f"/{rel_path}"
+                or "/test/" in f"/{rel_path}"
+                or "/__tests__/" in f"/{rel_path}"
                 or fname.startswith("test_")
-                or fname.endswith((".test.js", ".test.ts", ".spec.js", ".spec.ts"))
+                or fname.endswith(("_test.py", ".test.js", ".test.ts", ".spec.js", ".spec.ts"))
                 or rel_path.startswith("common/testing/")
             )
             try:
@@ -310,11 +316,22 @@ def audit_repository_and_generate_report_card(
 
             source_files.append((line_count, len(content), rel_path))
 
-            is_prod_module = rel_path.startswith(("apps/", "common/")) and "/scripts/" not in f"/{rel_path}"
-            is_prod_lambda_or_shared = (
-                (rel_path.startswith("common/shared/") or (rel_path.startswith("apps/") and "/src/" in f"/{rel_path}"))
-                and "/scripts/" not in f"/{rel_path}"
-            )
+            if is_glh_monorepo:
+                is_prod_module = rel_path.startswith(("apps/", "common/")) and "/scripts/" not in f"/{rel_path}"
+                is_prod_lambda_or_shared = (
+                    (
+                        rel_path.startswith("common/shared/")
+                        or (rel_path.startswith("apps/") and "/src/" in f"/{rel_path}")
+                    )
+                    and "/scripts/" not in f"/{rel_path}"
+                )
+            else:
+                is_non_prod_helper = any(
+                    seg in f"/{rel_path}"
+                    for seg in ("/scripts/", "/docs/", "/docs_src/", "/benchmarks/", "/bench/", "/tools/")
+                )
+                is_prod_module = not is_non_prod_helper
+                is_prod_lambda_or_shared = not is_non_prod_helper
 
             if fname.endswith((".js", ".ts", ".tsx")):
                 for m in empty_js_catch_re.finditer(content):
@@ -433,7 +450,10 @@ def audit_repository_and_generate_report_card(
     wasted_tokens_per_turn = sum(max(0, (chars - 20000) // 4) for _, chars, _ in monoliths_over_1000)
     total_src = max(1, len(source_files))
     monolith_ratio = len(monoliths_over_1000) / total_src
-    context_score = max(0.0, min(100.0, 100.0 - (monolith_ratio * 350.0)))
+    context_score = max(
+        0.0,
+        min(100.0, 100.0 - (monolith_ratio * 350.0) - (len(monoliths_over_1000) * 3.5)),
+    )
 
     # 3. AST Comprehensibility Score (Python AST primary; JS/TS fallback for pure JS/TS repos)
     if total_py_functions > 0:
