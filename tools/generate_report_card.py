@@ -284,14 +284,21 @@ def audit_repository_and_generate_report_card(repo_path: str) -> Tuple[str, Dict
     silent_per_100_files = (total_silent / total_src) * 100.0
     silent_score = max(0.0, min(100.0, 100.0 - (silent_per_100_files * 3.5)))
 
-    # 5. Self-Assessment Rubric Score (measured against executable code modules: .py, .js, .ts, .tsx)
+    # 5. Self-Assessment Rubric Score (measured against non-stub executable modules)
     executable_files = [
-        x for x in source_files if x[2].endswith((".py", ".js", ".ts", ".tsx"))
+        x
+        for x in source_files
+        if x[2].endswith((".py", ".js", ".ts", ".tsx"))
+        and not x[2].endswith("__init__.py")
+        and "/scripts/" not in f"/{x[2]}"
     ]
     total_exec = max(1, len(executable_files))
     test_ratio = len(test_files) / total_exec
     assertion_bonus = min(25.0, (total_assertions / total_exec) * 3.0)
-    testing_score = min(100.0, (test_ratio * 180.0) + assertion_bonus)
+    has_moto_harness = os.path.isfile(os.path.join(repo_root, "common", "testing", "sam_moto_harness.py"))
+    has_property_fuzzing = any("properties" in tf for tf in test_files)
+    sophistication_bonus = (10.0 if has_moto_harness else 0.0) + (8.0 if has_property_fuzzing else 0.0)
+    testing_score = min(100.0, (test_ratio * 180.0) + assertion_bonus + sophistication_bonus)
 
     # 6. Blast Radius & Cloud Cost Guardrail Score
     iac_penalties = (len(cfn_import_values) * 20.0) + (len(hardcoded_iam_arns) * 25.0)

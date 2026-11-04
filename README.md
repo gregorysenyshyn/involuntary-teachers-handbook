@@ -51,12 +51,13 @@ involuntary-teachers-handbook/
 │   ├── diagnose_stack.py                     # 3. Descriptive Feedback (EarlyValidation & import debugger)
 │   ├── validate_repo_hygiene.py              # 4. Mechanical Hall Monitor (Enforces AGENTS.md, PII masking, SSM & JS/Py contracts)
 │   ├── generate_report_card.py               # 5. The Codebase Report Card (Grades any repo A+ to F on Agent Readiness)
-│   └── test_impacted.py                      # 6. Diff-Aware Test Runner (Traces git diff + shared layer imports to impacted suites)
+│   ├── test_impacted.py                      # 6. Diff-Aware Test Runner (Traces git diff + shared layer imports to impacted suites)
+│   └── sam_moto_harness.py                   # 7. Zero-Config SAM -> Moto Test Harness & strict_patch (Prevents Lying MagicMocks)
 ├── templates/
-│   ├── CODEBASE_MAP.md                       # 7. The Campus Map (1-read microservice & port directory)
-│   └── SCHEMA_DICTIONARY.md                  # 8. The Vocabulary List (1-read database & payload contracts)
+│   ├── CODEBASE_MAP.md                       # 8. The Campus Map (1-read microservice & port directory)
+│   └── SCHEMA_DICTIONARY.md                  # 9. The Vocabulary List (1-read database & payload contracts)
 ├── examples/
-│   └── self-healing-loop/                    # 9. Self-Grading Homework (Overnight Auto-Heal Loop)
+│   └── self-healing-loop/                    # 10. Self-Grading Homework (Overnight Auto-Heal Loop)
 │       ├── error_reporter.py                 #    Lambda @github_error_reporter + PII-masked SNS publisher
 │       ├── client-error-listener.js          #    Browser JS / unhandledrejection / CSP error forwarder
 │       └── gemini-agent.yml                  #    GitHub Actions workflow (Issue -> OIDC Sandbox -> PR)

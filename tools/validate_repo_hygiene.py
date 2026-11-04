@@ -23,6 +23,7 @@ import glob
 import os
 import re
 import sys
+from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -376,7 +377,8 @@ def verify_cross_boundary_frontend_backend_payload_contracts(
         name = str(contract["name"])
         js_rel = str(contract["frontend_js"])
         py_rel = str(contract["backend_py"])
-        required_keys = list(contract["required_keys"])  # type: ignore[arg-type]
+        raw_keys = contract.get("required_keys", [])
+        required_keys = list(raw_keys) if isinstance(raw_keys, (list, tuple, set)) else []
 
         js_path = os.path.join(repo_root, js_rel)
         py_path = os.path.join(repo_root, py_rel)
@@ -529,6 +531,146 @@ def verify_cross_stack_ssm_parameter_wiring(repo_root: str = REPO_ROOT) -> List[
     return errors
 
 
+LEGACY_UNSPECCED_PATCH_CEILINGS: Dict[str, int] = {
+    "apps/auth/tests/functions/admin/test_admin_student_records.py": 9,
+    "apps/auth/tests/test_activity_monitor.py": 2,
+    "apps/auth/tests/test_consume_invite.py": 19,
+    "apps/auth/tests/test_error_handler.py": 2,
+    "apps/auth/tests/test_get_registration_details.py": 2,
+    "apps/auth/tests/test_oidc_proxy.py": 2,
+    "apps/auth/tests/test_post_confirmation_fallback.py": 7,
+    "apps/auth/tests/test_pre_token_generation.py": 12,
+    "apps/email/tests/functions/test_contact_form.py": 6,
+    "apps/email/tests/functions/test_lead_capture.py": 34,
+    "apps/email/tests/functions/test_process_bounce.py": 3,
+    "apps/email/tests/functions/test_process_transactional_email.py": 3,
+    "apps/email/tests/functions/test_send_nurture_email.py": 10,
+    "apps/email/tests/functions/test_unsubscribe.py": 15,
+    "apps/helpdesk/tests/test_functions.py": 6,
+    "apps/marking-queue/tests/functions/admin/marking_queue_complete/test_lambda_function.py": 4,
+    "apps/marking-queue/tests/functions/admin/marking_queue_get/test_lambda_function.py": 10,
+    "apps/marking-queue/tests/functions/admin/marking_queue_submit/test_lambda_function.py": 2,
+    "apps/marking-queue/tests/functions/prepare_transcode/test_lambda_function.py": 1,
+    "apps/marking-queue/tests/test_adapters_db.py": 2,
+    "apps/math-engine/tests/test_compiler.py": 1,
+    "apps/music/tests/test_music_practice_logic.py": 3,
+    "apps/ontarioliteracy/tests/test_dashboard.py": 1,
+    "apps/ontarioliteracy/tests/test_newsletter_sender.py": 5,
+    "apps/ontarioliteracy/tests/test_practice_feedback.py": 7,
+    "apps/ontarioliteracy/tests/test_scoring.py": 28,
+    "apps/ontarioliteracy/tests/test_scoring_worker.py": 2,
+    "apps/ontarioliteracy/tests/test_submit_result.py": 3,
+    "apps/phys-ed/tests/test_phys_ed_logic.py": 15,
+    "apps/phys-ed/tests/test_phys_ed_utils.py": 2,
+    "apps/scheduler/tests/test_count_future.py": 2,
+    "apps/scheduler/tests/test_list_appointments.py": 1,
+    "apps/security/tests/test_error_ticket_creator.py": 4,
+    "apps/security/tests/test_refactored_functions.py": 10,
+    "apps/social-poster/tests/test_get_presigned_url.py": 1,
+    "apps/social-poster/tests/test_process_post_queue.py": 3,
+    "apps/social-poster/tests/test_schedule_post.py": 5,
+    "apps/top-secret-area/tests/functions/admin/ai_settings/test_main.py": 2,
+    "apps/top-secret-area/tests/functions/admin/dashboard/test_dashboard.py": 9,
+    "apps/top-secret-area/tests/functions/admin/journey/test_journey.py": 22,
+    "apps/top-secret-area/tests/functions/admin/report_card/test_report_card.py": 27,
+    "tools/tests/test_aws_audit.py": 2,
+    "tools/tests/test_manage.py": 18,
+    "tools/tests/test_ssm_ensure_secrets.py": 3,
+}
+
+
+def verify_test_suite_quality(repo_root: str = REPO_ROOT) -> List[str]:
+    """
+    Enforce AST-level test quality across `apps/*/tests/**/test_*.py` and `tools/tests/test_*.py`:
+    1. Every `def test_*` function must contain at least one explicit verification (`assert`,
+       `pytest.raises`, `pytest.warns`, `pytest.fail`, or an `assert*`/`verify*`/`check*` helper).
+    2. Ban bare `.assert_called()` with zero arguments (must use `.assert_called_once()` or
+       `.assert_called_with(...)`).
+    3. Ban manual `del sys.modules[...]` / `sys.modules.pop(...)` hacks in test files
+       (must use `load_isolated_lambda_module` from `common.testing.sam_moto_harness`).
+    4. Ratchet un-specced `unittest.mock.patch(...)` calls (`autospec=True` or `strict_patch`).
+    """
+    errors: List[str] = []
+    root = Path(repo_root)
+    test_files = sorted(
+        list(root.glob("apps/*/tests/**/test_*.py"))
+        + list(root.glob("tools/tests/test_*.py"))
+    )
+
+    for tf in test_files:
+        rel_path = tf.relative_to(root).as_posix()
+        try:
+            source = tf.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=rel_path)
+        except Exception as exc:
+            errors.append(f"{rel_path}: failed to parse test AST ({exc})")
+            continue
+
+        uses_strict_patch = "strict_patch" in source
+        unspecced_patch_lines: List[int] = []
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and not uses_strict_patch:
+                fn = ast.unparse(node.func)
+                if fn in ("patch", "unittest.mock.patch", "mock.patch"):
+                    kw_names = {k.arg for k in node.keywords if k.arg}
+                    if len(node.args) == 1 and not (
+                        kw_names & {"autospec", "spec", "spec_set", "new", "new_callable"}
+                    ):
+                        unspecced_patch_lines.append(node.lineno)
+
+            if isinstance(node, ast.Delete):
+                for target in node.targets:
+                    if "sys.modules" in ast.unparse(target):
+                        errors.append(
+                            f"{rel_path}:{node.lineno} deletes from `sys.modules` directly; "
+                            f"use `load_isolated_lambda_module` from `common.testing.sam_moto_harness`."
+                        )
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if node.func.attr == "pop" and "sys.modules" in ast.unparse(node.func.value):
+                    errors.append(
+                        f"{rel_path}:{node.lineno} pops from `sys.modules` directly; "
+                        f"use `load_isolated_lambda_module` from `common.testing.sam_moto_harness`."
+                    )
+
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
+                has_verification = False
+                for child in ast.walk(node):
+                    if isinstance(child, ast.Assert):
+                        has_verification = True
+                    elif isinstance(child, ast.Call):
+                        func_expr = ast.unparse(child.func)
+                        if any(
+                            token in func_expr
+                            for token in ("assert", "raises", "warns", "fail", "verify", "check")
+                        ):
+                            has_verification = True
+                        if (
+                            isinstance(child.func, ast.Attribute)
+                            and child.func.attr == "assert_called"
+                            and not child.args
+                            and not child.keywords
+                        ):
+                            errors.append(
+                                f"{rel_path}:{child.lineno} (`{node.name}`) uses bare `.assert_called()`; "
+                                f"use `.assert_called_once()` or `.assert_called_with(...)`."
+                            )
+                if not has_verification:
+                    errors.append(
+                        f"{rel_path}:{node.lineno} (`{node.name}`) has no `assert` or `pytest.raises` verification."
+                    )
+
+        allowed_unspecced = LEGACY_UNSPECCED_PATCH_CEILINGS.get(rel_path, 0)
+        if len(unspecced_patch_lines) > allowed_unspecced:
+            errors.append(
+                f"{rel_path} contains {len(unspecced_patch_lines)} un-specced `patch(...)` call(s) "
+                f"at line(s) {sorted(unspecced_patch_lines)} (allowed ceiling: {allowed_unspecced}). "
+                f"Pass `autospec=True` or use `from common.testing import strict_patch as patch`."
+            )
+
+    return errors
+
+
 def run_all_repo_hygiene_checks(repo_root: str = REPO_ROOT) -> Tuple[bool, List[str]]:
     """Run all repository hygiene, documentation sync, and cross-boundary contract checks."""
     all_errors: List[str] = []
@@ -542,6 +684,7 @@ def run_all_repo_hygiene_checks(repo_root: str = REPO_ROOT) -> Tuple[bool, List[
         verify_cross_stack_ssm_parameter_wiring,
         verify_sam_lambda_handler_contracts,
         verify_cross_boundary_frontend_backend_payload_contracts,
+        verify_test_suite_quality,
     ]
     for check_fn in checks:
         all_errors.extend(check_fn(repo_root))
