@@ -555,7 +555,7 @@ def audit_repository_and_generate_report_card(
         team_size=team_size,
     )
     calculator_url = (
-        f"https://gregorysenyshyn.com/training"
+        f"https://gregorysenyshyn.com/involuntary-teachers-college"
         f"?score={overall_score:.0f}&grade={overall_grade}"
         f"&monoliths={len(monoliths_over_1000)}&tokens={wasted_tokens_per_turn}#roi-calculator"
     )
@@ -602,7 +602,7 @@ def audit_repository_and_generate_report_card(
 3. **Consolidate Structural AST Clones & Silent Fallbacks:** {f'Extract the {len(clone_clusters)} AST clone clusters into shared utilities and replace the {total_silent} silent `except: pass` / `catch {{}}` blocks with descriptive logging.' if (clone_clusters or total_silent) else 'Zero AST clones or silent fallbacks detected—keep enforcing via AST pre-commit checks.'}
 
 > **🍎 Want help turning this Report Card into an A+?**  
-> Book a **1-Day PD Day (Socratic Red-Teaming Clinic)** or **The 4-Part Monorepo Makeover** at **[gregorysenyshyn.com/training](https://gregorysenyshyn.com/training)**.
+> Book a **1-Day PD Day (Socratic Red-Teaming Clinic)** or **The 4-Part Monorepo Makeover** at **[gregorysenyshyn.com/involuntary-teachers-college](https://gregorysenyshyn.com/involuntary-teachers-college)**.
 """
     metrics = {
         "overall_score": round(overall_score, 1),
